@@ -1,14 +1,10 @@
-use sdl2::audio::{AudioCVT, AudioCallback, AudioSpecDesired, AudioSpecWAV, AudioFormat, AudioDevice};
-use std::path::Path;
+use sdl2::audio::{AudioCallback, AudioSpecDesired, AudioDevice};
 
-pub type SoundData = Vec<u8>;
-const SETUP_U8: i32 = 1 << 7;
-const SETUP_U16: i32 = 1 << 15;
-
-pub static AUDIO_HALT_DATA: SoundData = Vec::new();
+pub type SoundData16 = Vec<u16>;
+pub const SETUP_U16: i32 = 1 << 15;
 
 pub struct Sound {
-    buffer: SoundData,
+    buffer: SoundData16,
     buf_size: usize,
     volume: u16,
     mute: bool,
@@ -21,7 +17,7 @@ pub type SoundDevice = AudioDevice<Sound>;
 pub trait Control {
     fn set_mute(&mut self, specifier: bool);
     fn set_volume(&mut self, volume: u16);
-    fn set_data(&mut self, offset: usize, sound: &[u8]);
+    fn set_data(&mut self, offset: usize, sound: &[u16]);
     fn buf_size(&mut self) -> usize;
     fn mute(&mut self) -> bool;
     fn volume(&mut self) -> u16;
@@ -40,7 +36,7 @@ impl Control for SoundDevice {
         locked.volume = volume;
     }
 
-    fn set_data(&mut self, offset: usize, sound: &[u8]) {
+    fn set_data(&mut self, offset: usize, sound: &[u16]) {
         let mut locked = self.lock();
         let mut pos = offset;
         let len = locked.buf_size;
@@ -85,17 +81,17 @@ impl AudioCallback for Sound {
                 0
             } else {
             let pos = self.current % self.buf_size;
-                let raw_sample = *self.buffer.get(pos).unwrap_or(&(SETUP_U8 as u8));
-                let singed_sample = raw_sample as i32 - SETUP_U8;
+                let raw_sample = *self.buffer.get(pos).unwrap_or(&(SETUP_U16 as u16));
+                let singed_sample = raw_sample as i32 - SETUP_U16;
                 let scaled_singed_sample = match self.volume {
                     0 => 0,
-                    1 => singed_sample << 2,
-                    2 => singed_sample << 3,
-                    3 => singed_sample << 4,
-                    4 => singed_sample << 5,
-                    5 => singed_sample << 6,
-                    6 => singed_sample << 7,
-                    _ => singed_sample << 8,
+                    1 => singed_sample >> 6,
+                    2 => singed_sample >> 5,
+                    3 => singed_sample >> 4,
+                    4 => singed_sample >> 3,
+                    5 => singed_sample >> 2,
+                    6 => singed_sample >> 1,
+                    _ => singed_sample ,
                 };
                 scaled_singed_sample
             };
@@ -170,7 +166,7 @@ impl AudioContext {
     pub fn open_device(&self, len: usize) -> Result<SoundDevice, String> {
         self.audio_subsystem.open_playback(None, &self.desired_spec, |_spec| {
             Sound {
-                buffer: vec![SETUP_U8 as u8; len],
+                buffer: vec![SETUP_U16 as u16; len],
                 buf_size: len,
                 volume: 0,
                 current: 0,
@@ -178,21 +174,6 @@ impl AudioContext {
                 called: 0,
             }
         })
-    }
-
-    pub fn wav_file_to_sound<P: AsRef<Path>>(&self, path: P) -> Result<SoundData, String> {
-        if let Ok(wav) = AudioSpecWAV::load_wav(path) {
-            if let Ok(cvt) = AudioCVT::new(
-                wav.format, wav.channels, wav.freq,
-                AudioFormat::U8, 1, 32_000,
-            ) {
-                Ok(cvt.convert(wav.buffer().to_vec()))
-            } else {
-                Err("Could not convert WAV file".to_owned())
-            }
-        } else {
-            Err("Could not open WAV file".to_owned())
-        }
     }
 }
 
