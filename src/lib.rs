@@ -18,6 +18,7 @@ pub trait Control {
     fn set_mute(&mut self, specifier: bool);
     fn set_volume(&mut self, volume: u16);
     fn set_data(&mut self, offset: usize, sound: &[u16]);
+    fn set_silent_data(&mut self);
     fn buf_size(&mut self) -> usize;
     fn mute(&mut self) -> bool;
     fn volume(&mut self) -> u16;
@@ -44,6 +45,14 @@ impl Control for SoundDevice {
             locked.buffer[pos % len] = *a;
             pos += 1;
         }
+    }
+
+    fn set_silent_data(&mut self) {
+        let mut locked = self.lock();
+        for d in locked.buffer.iter_mut() {
+            *d = SETUP_U16 as u16;
+        }
+        locked.current = 0;
     }
 
     fn buf_size(&mut self) -> usize {
