@@ -10,6 +10,7 @@ pub struct Sound {
     mute: bool,
     current: usize,
     called: usize,
+    remain: usize,
 }
 
 pub type SoundDevice = AudioDevice<Sound>;
@@ -18,12 +19,14 @@ pub trait Control {
     fn set_mute(&mut self, specifier: bool);
     fn set_volume(&mut self, volume: u16);
     fn set_data(&mut self, offset: usize, sound: &[u16]);
+    fn push_data(&mut self, sound: &[u16]);
     fn set_silent_data(&mut self);
     fn buf_size(&mut self) -> usize;
     fn mute(&mut self) -> bool;
     fn volume(&mut self) -> u16;
     fn current(&mut self) -> usize;
     fn called(&mut self) -> usize;
+    fn remain(&mut self) -> usize;
 }
 
 impl Control for SoundDevice {
@@ -45,6 +48,18 @@ impl Control for SoundDevice {
             locked.buffer[pos % len] = *a;
             pos += 1;
         }
+        locked.remain += sound.len();
+    }
+
+    fn push_data(&mut self, sound: &[u16]) {
+        let mut locked = self.lock();
+        let mut pos = locked.current + locked.remain;
+        let len = locked.buf_size;
+        for a in sound {
+            locked.buffer[pos % len] = *a;
+            pos += 1;
+        }
+        locked.remain += sound.len();
     }
 
     fn set_silent_data(&mut self) {
@@ -53,6 +68,7 @@ impl Control for SoundDevice {
             *d = SETUP_U16 as u16;
         }
         locked.current = 0;
+        locked.remain = locked.buf_size;
     }
 
     fn buf_size(&mut self) -> usize {
@@ -79,6 +95,11 @@ impl Control for SoundDevice {
         let locked = self.lock();
         locked.called
     }
+
+    fn remain(&mut self) -> usize {
+        let locked = self.lock();
+        locked.remain
+    }
 }
 
 impl AudioCallback for Sound {
@@ -86,26 +107,31 @@ impl AudioCallback for Sound {
 
     fn callback(&mut self, out: &mut [u16]) {
         for dst in out.iter_mut() {
-            let output = if self.mute || self.volume == 0 {
-                0
+            if self.remain == 0 {
+                *dst = SETUP_U16 as u16;
             } else {
-            let pos = self.current % self.buf_size;
-                let raw_sample = *self.buffer.get(pos).unwrap_or(&(SETUP_U16 as u16));
-                let singed_sample = raw_sample as i32 - SETUP_U16;
-                let scaled_singed_sample = match self.volume {
-                    0 => 0,
-                    1 => singed_sample >> 6,
-                    2 => singed_sample >> 5,
-                    3 => singed_sample >> 4,
-                    4 => singed_sample >> 3,
-                    5 => singed_sample >> 2,
-                    6 => singed_sample >> 1,
-                    _ => singed_sample ,
+                let output = if self.mute || self.volume == 0 {
+                    0
+                } else {
+                    let pos = self.current % self.buf_size;
+                    let raw_sample = *self.buffer.get(pos).unwrap_or(&(SETUP_U16 as u16));
+                    let singed_sample = raw_sample as i32 - SETUP_U16;
+                    let scaled_singed_sample = match self.volume {
+                        0 => 0,
+                        1 => singed_sample >> 6,
+                        2 => singed_sample >> 5,
+                        3 => singed_sample >> 4,
+                        4 => singed_sample >> 3,
+                        5 => singed_sample >> 2,
+                        6 => singed_sample >> 1,
+                        _ => singed_sample ,
+                    };
+                    scaled_singed_sample
                 };
-                scaled_singed_sample
-            };
-            *dst = (output + SETUP_U16) as u16;
-            self.current += 1;
+                *dst = (output + SETUP_U16) as u16;
+                self.current += 1;
+                self.remain -= 1;
+            }
         }
         self.called += 1;
     }
@@ -181,6 +207,7 @@ impl AudioContext {
                 current: 0,
                 mute: false,
                 called: 0,
+                remain: 0,
             }
         })
     }
